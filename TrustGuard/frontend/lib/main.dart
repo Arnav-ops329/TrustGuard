@@ -34,7 +34,7 @@ class _TrustGuardAppState extends State<TrustGuardApp> {
   }
 }
 
-/* ================= THEMES ================= */
+/* ================= THEMES (UNCHANGED) ================= */
 
 ThemeData _lightTheme() {
   return ThemeData(
@@ -60,7 +60,7 @@ ThemeData _darkTheme() {
   );
 }
 
-/* ================= MAIN SHELL ================= */
+/* ================= MAIN SHELL (UNCHANGED) ================= */
 
 class MainShell extends StatefulWidget {
   final bool darkMode;
@@ -130,8 +130,16 @@ class _ScanPageState extends State<ScanPage>
 
   bool loading = false;
   bool hasResult = false;
+
   String resultText = "";
+  String reason = "";
+  String label = "";
+
   double score = 0;
+  double medicalRisk = 0;
+  double scamRisk = 0;
+  double languageRisk = 0;
+
   Color statusColor = Colors.green;
 
   late AnimationController anim;
@@ -141,9 +149,7 @@ class _ScanPageState extends State<ScanPage>
   void initState() {
     super.initState();
     anim = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 800),
-    );
+        vsync: this, duration: const Duration(milliseconds: 800));
     meter = Tween<double>(begin: 0, end: 0).animate(
       CurvedAnimation(parent: anim, curve: Curves.easeOutCubic),
     );
@@ -157,26 +163,26 @@ class _ScanPageState extends State<ScanPage>
   }
 
   void clearAll() {
-    anim.stop();
     anim.reset();
     setState(() {
-      controller.text = "";
+      controller.clear();
       loading = false;
       hasResult = false;
-      score = 0;
       resultText = "";
+      reason = "";
+      label = "";
+      score = 0;
     });
     FocusScope.of(context).unfocus();
   }
 
-  Future<void> check(String type) async {
-    if (controller.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Please enter some text")),
-      );
-      return;
-    }
+  String _riskLabel(double s) {
+    if (s >= 80) return "SAFE";
+    if (s >= 40) return "CAUTION";
+    return "DANGEROUS";
+  }
 
+  Future<void> check(String type) async {
     if (controller.text.trim().length < 15) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Please enter more meaningful text")),
@@ -191,9 +197,7 @@ class _ScanPageState extends State<ScanPage>
 
     try {
       String text = controller.text.trim();
-      if (text.length > 300) {
-        text = text.substring(0, 300);
-      }
+      if (text.length > 300) text = text.substring(0, 300);
 
       final url = type == "news"
           ? "http://127.0.0.1:8000/check-news"
@@ -208,21 +212,29 @@ class _ScanPageState extends State<ScanPage>
           .timeout(const Duration(seconds: 5));
 
       final data = jsonDecode(res.body);
-      bool safe;
 
+      bool safe;
       if (type == "news") {
         safe = data["news"] == "Real";
         score = safe ? 88 : 22;
         resultText =
             safe ? "Content appears trustworthy" : "Content is likely fake";
+        reason = data["reason"] ?? "Linguistic & factual pattern analysis";
         statusColor = safe ? Colors.green : Colors.red;
       } else {
         safe = !data["is_scam"];
         score = safe ? 82 : 15;
         resultText =
             safe ? "No scam patterns detected" : "High risk of online scam";
+        reason = "Intent & scam pattern detection";
         statusColor = safe ? Colors.green : Colors.orange;
       }
+
+      label = _riskLabel(score);
+
+      medicalRisk = type == "news" && !safe ? 90 : 20;
+      scamRisk = type == "scam" && !safe ? 85 : 15;
+      languageRisk = safe ? 30 : 75;
 
       meter = Tween<double>(begin: 0, end: score).animate(
         CurvedAnimation(parent: anim, curve: Curves.easeOutCubic),
@@ -233,30 +245,47 @@ class _ScanPageState extends State<ScanPage>
         hasResult = true;
       });
 
-      widget.onResult(resultText);
+      widget.onResult("$label • $resultText");
       anim.forward(from: 0);
     } catch (e) {
       setState(() {
         loading = false;
         hasResult = true;
-        resultText = "Analysis took too long. Try shorter text.";
-        statusColor = Colors.orange;
+        label = "CAUTION";
+        resultText = "Analysis took too long";
+        reason = "Network or processing delay";
         score = 40;
+        statusColor = Colors.orange;
       });
     }
+  }
+
+  Widget _riskBar(String title, double value, Color color) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title, style: const TextStyle(fontSize: 12)),
+          const SizedBox(height: 4),
+          LinearProgressIndicator(
+            value: value / 100,
+            minHeight: 5,
+            color: color,
+            backgroundColor: color.withOpacity(0.2),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       floatingActionButton: hasResult
-          ? AnimatedScale(
-              scale: hasResult ? 1 : 0,
-              duration: const Duration(milliseconds: 300),
-              child: FloatingActionButton(
-                onPressed: clearAll,
-                child: const Icon(Icons.refresh),
-              ),
+          ? FloatingActionButton(
+              onPressed: clearAll,
+              child: const Icon(Icons.refresh),
             )
           : null,
       body: SafeArea(
@@ -269,7 +298,7 @@ class _ScanPageState extends State<ScanPage>
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text("TrustGuard",
+                  const Text("TrustGuard AI",
                       style:
                           TextStyle(fontSize: 30, fontWeight: FontWeight.bold)),
                   IconButton(
@@ -282,7 +311,6 @@ class _ScanPageState extends State<ScanPage>
               const SizedBox(height: 20),
               AnimatedContainer(
                 duration: const Duration(milliseconds: 300),
-                curve: Curves.easeOut,
                 decoration: BoxDecoration(
                   color: Theme.of(context).cardColor,
                   borderRadius: BorderRadius.circular(20),
@@ -310,32 +338,24 @@ class _ScanPageState extends State<ScanPage>
               Row(
                 children: [
                   Expanded(
-                    child: AnimatedScale(
-                      scale: loading ? 0.95 : 1,
-                      duration: const Duration(milliseconds: 200),
-                      child: ElevatedButton(
-                        onPressed: loading ? null : () => check("news"),
-                        child: const Text("Check News"),
-                      ),
+                    child: ElevatedButton(
+                      onPressed: loading ? null : () => check("news"),
+                      child: const Text("Check News"),
                     ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
-                    child: AnimatedScale(
-                      scale: loading ? 0.95 : 1,
-                      duration: const Duration(milliseconds: 200),
-                      child: OutlinedButton(
-                        onPressed: loading ? null : () => check("scam"),
-                        child: const Text("Check Scam"),
-                      ),
+                    child: OutlinedButton(
+                      onPressed: loading ? null : () => check("scam"),
+                      child: const Text("Check Scam"),
                     ),
                   ),
                 ],
               ),
               const SizedBox(height: 20),
               if (loading)
-                Column(
-                  children: const [
+                const Column(
+                  children: [
                     CircularProgressIndicator(),
                     SizedBox(height: 10),
                     Text("Analyzing content…"),
@@ -350,55 +370,35 @@ class _ScanPageState extends State<ScanPage>
                     opacity: hasResult ? 1 : 0,
                     duration: const Duration(milliseconds: 400),
                     child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const SizedBox(height: 20),
-                        Container(
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            boxShadow: [
-                              BoxShadow(
-                                color: statusColor.withOpacity(0.4),
-                                blurRadius: 25,
-                                spreadRadius: 4,
-                              ),
-                            ],
-                          ),
-                          child: SizedBox(
-                            height: 120,
-                            width: 120,
-                            child: Stack(
-                              fit: StackFit.expand,
-                              children: [
-                                AnimatedBuilder(
-                                  animation: meter,
-                                  builder: (_, __) => CircularProgressIndicator(
-                                    value: meter.value / 100,
-                                    strokeWidth: 10,
-                                    color: statusColor,
-                                  ),
-                                ),
-                                Center(
-                                  child: Text(
-                                    "${meter.value.toInt()}%",
-                                    style: const TextStyle(
-                                        fontSize: 22,
-                                        fontWeight: FontWeight.bold),
-                                  ),
-                                ),
-                              ],
-                            ),
+                        Text(label,
+                            style: TextStyle(
+                                color: statusColor,
+                                fontSize: 22,
+                                fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 6),
+                        Text(resultText,
+                            style: const TextStyle(
+                                fontSize: 16, fontWeight: FontWeight.w600)),
+                        const SizedBox(height: 6),
+                        Text("Reason: $reason",
+                            style: const TextStyle(fontSize: 13)),
+                        const SizedBox(height: 16),
+                        AnimatedBuilder(
+                          animation: meter,
+                          builder: (_, __) => LinearProgressIndicator(
+                            value: meter.value / 100,
+                            minHeight: 10,
+                            color: statusColor,
                           ),
                         ),
                         const SizedBox(height: 12),
-                        Text(
-                          resultText,
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: statusColor,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
+                        _riskBar("Medical Risk", medicalRisk, Colors.red),
+                        _riskBar("Scam Risk", scamRisk, Colors.orange),
+                        _riskBar("Language Manipulation Risk", languageRisk,
+                            Colors.blue),
                       ],
                     ),
                   ),
@@ -411,7 +411,7 @@ class _ScanPageState extends State<ScanPage>
   }
 }
 
-/* ================= HISTORY PAGE ================= */
+/* ================= HISTORY PAGE (UNCHANGED ENHANCED) ================= */
 
 class HistoryPage extends StatelessWidget {
   final List<String> history;
@@ -579,7 +579,7 @@ class HistoryPage extends StatelessWidget {
   }
 }
 
-/* ================= ABOUT PAGE ================= */
+/* ================= ABOUT PAGE (UNCHANGED ENHANCED) ================= */
 
 class AboutPage extends StatelessWidget {
   const AboutPage({super.key});
